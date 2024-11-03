@@ -1,0 +1,98 @@
+<mule xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+      xsi:schemaLocation="
+          http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+          http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd 
+          http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/4.3/mule.xsd
+          http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
+
+    <http:request-config name="HTTP_Request_Config" doc:name="HTTP Request Configuration">
+        <http:request-connection host="api.openai.com" port="443" protocol="HTTPS"/>
+    </http:request-config>
+
+    <flow name="process" doc:id="7a634499-77c9-4985-ae50-0a4e77fec729">
+        <set-variable variableName="textRequest" value="#[payload]" doc:name="Store Original Request"/>
+
+        <set-variable variableName="apiKey" value="#[attributes.headers['apikey']]" doc:name="Set API Key"/>
+
+        <ee:transform doc:name="Create OpenAI Request">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var textRequest = vars.textRequest default {}
+var text = (textRequest.text as String) default ""
+var translate = (textRequest.translate as Boolean) default false
+var correct = (textRequest.correct as Boolean) default false
+var format = (textRequest.format as Boolean) default false
+var targetLanguage = if (translate) (textRequest.targetLanguage as String default "english") else null
+
+var actions = [
+    if (translate) "translate" else "",
+    if (correct) "correct" else "",
+    if (format) "format" else ""
+] filter ($ != null and $ != "")
+
+var actionText = if (sizeOf(actions) > 0) actions joinBy " and " else ""
+
+var instructions = 
+    if (actionText != "") 
+        "Please " ++ actionText ++ " the following text" ++
+        (if (translate and targetLanguage != null and targetLanguage != "") 
+            " into " ++ targetLanguage 
+        else "") ++ ":" 
+    else 
+        "Please process the following text:"
+
+---
+{
+    model: "gpt-4o-mini",
+    messages: [
+        {
+            role: "system",
+            content: "You are a helpful assistant. When processing the user's request, return **only** the processed text, without any additional explanations or comments."
+        },
+        {
+            role: "user",
+            content: instructions ++ "\n\n" ++ text
+        }
+    ]
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <http:request method="POST" doc:name="Request to OpenAI" config-ref="HTTP_Request_Config" path="/v1/chat/completions">
+            <http:headers><![CDATA[#[{
+                "Content-Type" : "application/json",
+                "Authorization" : "Bearer " ++ vars.apiKey
+            }]]]></http:headers>
+        </http:request>
+
+        <ee:transform doc:name="Process OpenAI Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var textRequest = vars.textRequest
+var response = payload
+var processedText = response.choices[0].message.content
+var actionsPerformed = [
+    if (textRequest.translate == true) "translate" else null,
+    if (textRequest.correct == true) "correct" else null,
+    if (textRequest.format == true) "format" else null
+] filter ($ != null)
+
+---
+{
+    "originalText": textRequest.text,
+    "processedText": processedText,
+    "actionsPerformed": actionsPerformed
+} ++ (if (textRequest.translate == true) { "targetLanguage": textRequest.targetLanguage } else {})
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </flow>
+</mule>

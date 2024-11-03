@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
+	<error-handler name="global-error-handler" doc:id="ff00742e-3b41-46ca-b06a-4184b39859ad" >
+	<on-error-propagate type="APIKIT:BAD_REQUEST" enableNotifications="true" logException="true">
+	    <set-variable value="#[400]" variableName="httpStatus" />
+	    <set-variable value="Invalid input format" variableName="errorMessage" />
+	    <set-variable value="The field 'text' is required and must be a string." variableName="errorDetails" />
+	    <flow-ref name="global-prepare-error-response-sub-flow" />
+	</on-error-propagate>
+
+	<on-error-propagate type="HTTP:CLIENT_SECURITY" enableNotifications="true" logException="true">
+	    <set-variable value="#[401]" variableName="httpStatus" />
+	    <set-variable value="Unauthorized" variableName="errorMessage" />
+	    <set-variable value="Access token is missing or invalid." variableName="errorDetails" />
+	    <flow-ref name="global-prepare-error-response-sub-flow" />
+	</on-error-propagate>
+		
+	<on-error-propagate type="HTTP:INTERNAL_SERVER_ERROR" enableNotifications="true" logException="true">
+	    <set-variable value="#[500]" variableName="httpStatus" />
+	    <set-variable value="Internal Server Error" variableName="errorMessage" />
+	    <set-variable value="An error occurred while processing the text for translation." variableName="errorDetails" />
+	    <flow-ref name="global-prepare-error-response-sub-flow" />
+	</on-error-propagate>
+
+</error-handler>
+<sub-flow name="global-prepare-error-response-sub-flow">
+    <ee:transform doc:name="Error Response">
+        <ee:message>
+            <ee:set-payload><![CDATA[%dw 2.0
+output application/json encoding="UTF-8", skipNullOn="everywhere"
+---
+{
+    code : vars.httpStatus,
+    message : vars.errorMessage,
+    details : vars.errorDetails,
+    dateTime : now() as String { format: "yyyy-MM-dd'T'HH:mm:ss'Z'" },
+    transactionId : vars.transactionId,
+    correlationId : correlationId
+}
+]]></ee:set-payload>
+        </ee:message>
+    </ee:transform>
+</sub-flow>
+
+</mule>
